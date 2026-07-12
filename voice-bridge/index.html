@@ -23,6 +23,7 @@
 <body>
   <div class="pulse"></div>
   <p id="status">Ouvindo... fale agora</p>
+  <button id="stopBtn" style="padding:12px 24px;font-size:15px;font-weight:600;background:#fff;color:#c62828;border:none;border-radius:8px;cursor:pointer;">Parar</button>
 
   <script>
     // This page exists ONLY to escape the Google Apps Script iframe sandbox,
@@ -30,7 +31,11 @@
     // As a real top-level window (opened via window.open from the PWA),
     // it gets normal mic permission. Result goes back via postMessage.
 
+    var resultSent = false;
+
     function sendResult(payload) {
+      if (resultSent) return;
+      resultSent = true;
       if (window.opener) window.opener.postMessage(payload, '*');
       setTimeout(function () { window.close(); }, payload.error ? 1500 : 300);
     }
@@ -39,6 +44,7 @@
 
     if (!SpeechRecognition) {
       document.getElementById('status').textContent = 'Reconhecimento de voz não suportado neste navegador.';
+      document.getElementById('stopBtn').style.display = 'none';
       sendResult({ source: 'voiceLeadBridge', error: 'unsupported' });
     } else {
       var recognition = new SpeechRecognition();
@@ -58,7 +64,28 @@
         sendResult({ source: 'voiceLeadBridge', error: event.error });
       };
 
+      // Fires after stop() (manual or automatic silence detection). If
+      // nothing was captured — e.g. user tapped Parar before saying
+      // anything — close gracefully instead of leaving the popup hanging.
+      recognition.onend = function () {
+        if (!resultSent) {
+          document.getElementById('status').textContent = 'Nada foi reconhecido. Tente novamente.';
+          sendResult({ source: 'voiceLeadBridge', error: 'no-speech' });
+        }
+      };
+
       recognition.start();
+
+      document.getElementById('stopBtn').onclick = function () {
+        document.getElementById('status').textContent = 'Processando...';
+        recognition.stop();
+      };
+
+      // Safety timeout — never listen indefinitely, even if silence
+      // detection fails to trigger on its own.
+      setTimeout(function () {
+        if (!resultSent) recognition.stop();
+      }, 20000);
     }
   </script>
 </body>
