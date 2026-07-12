@@ -49,26 +49,39 @@
     } else {
       var recognition = new SpeechRecognition();
       recognition.lang = 'pt-BR';
-      recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.continuous = true;      // don't auto-stop on the first pause
+      recognition.interimResults = false; // only accumulate finalized chunks
       recognition.maxAlternatives = 1;
 
+      var currentTranscript = '';
+
       recognition.onresult = function (event) {
-        var transcript = event.results[0][0].transcript;
-        document.getElementById('status').textContent = 'Enviando: "' + transcript + '"';
-        sendResult({ source: 'voiceLeadBridge', transcript: transcript });
+        var combined = '';
+        for (var i = 0; i < event.results.length; i++) {
+          combined += event.results[i][0].transcript + ' ';
+        }
+        currentTranscript = combined.trim();
+        document.getElementById('status').textContent = 'Ouvindo: "' + currentTranscript + '"';
       };
 
       recognition.onerror = function (event) {
-        document.getElementById('status').textContent = 'Erro: ' + event.error;
-        sendResult({ source: 'voiceLeadBridge', error: event.error });
+        // "no-speech" can fire mid-recording in continuous mode on some
+        // devices even though the user is still talking — don't treat it
+        // as fatal, just let onend decide based on what's accumulated.
+        if (event.error !== 'no-speech') {
+          document.getElementById('status').textContent = 'Erro: ' + event.error;
+          sendResult({ source: 'voiceLeadBridge', error: event.error });
+        }
       };
 
-      // Fires after stop() (manual or automatic silence detection). If
-      // nothing was captured — e.g. user tapped Parar before saying
-      // anything — close gracefully instead of leaving the popup hanging.
+      // Fires only after stop() is explicitly called (manual button or
+      // safety timeout below) — never on its own mid-sentence pause.
       recognition.onend = function () {
-        if (!resultSent) {
+        if (resultSent) return;
+        if (currentTranscript) {
+          document.getElementById('status').textContent = 'Enviando: "' + currentTranscript + '"';
+          sendResult({ source: 'voiceLeadBridge', transcript: currentTranscript });
+        } else {
           document.getElementById('status').textContent = 'Nada foi reconhecido. Tente novamente.';
           sendResult({ source: 'voiceLeadBridge', error: 'no-speech' });
         }
@@ -81,8 +94,8 @@
         recognition.stop();
       };
 
-      // Safety timeout — never listen indefinitely, even if silence
-      // detection fails to trigger on its own.
+      // Safety timeout — never listen indefinitely, even if the button
+      // is never pressed.
       setTimeout(function () {
         if (!resultSent) recognition.stop();
       }, 20000);
